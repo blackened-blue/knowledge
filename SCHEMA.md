@@ -9,10 +9,11 @@
   multiple versions**. Captures and distills: architecture/system design and diagrams;
   source code, database schemas, and configuration; requirements, incidents, and test
   cases; Git history (commits, diffs, branches, tags, release notes); meeting notes;
-  external documentation, URLs, and transcripts. Governing principle: raw evidence lives
-  in `raw/`, every page is review-gated, and every claim must trace back to its original
-  Source. The Knowledge Base is **technology-independent** — it must not assume a
-  specific programming language, framework, database, or project layout.
+  external documentation, URLs, and transcripts. Governing principle: every claim traces
+  back to its original Source — Git-native evidence by commit-pinned pointer, everything
+  else preserved in `raw/` (§Raw Storage vs. Git Pointer) — every page is review-gated.
+  The Knowledge Base is **technology-independent** — it must not assume a specific
+  programming language, framework, database, or project layout.
 - **Source types:** architecture/design documents, diagrams, source code, database
   schemas/configuration files, requirements documents, incident reports, test cases,
   Git commits/diffs/branches/tags, release notes, meeting notes, external documentation,
@@ -136,7 +137,11 @@ authoritative identity of the Source. The authoritative identity is the Git info
 (`branch + commit`, or `release tag + commit`).
 
 ### Development Source
-Represents work not yet an official release. Store under:
+Represents work not yet an official release. **Pointer, not copy:** if the Source lives
+in the Project's own Git repository (source code, config, commits/diffs, branches/tags),
+do not copy it into `raw/` — cite it directly by branch/commit (§Citations). `raw/` is
+reserved for material with no Git-native home (see **Raw Storage vs. Git Pointer**
+below). Non-git material for a Development Source, when any exists, still goes under:
 
 ```
 raw/
@@ -165,6 +170,16 @@ source:
   baseRelease: v1.1
 ```
 
+**Caution — unmerged branches can vanish.** A commit is only safe from Git garbage
+collection while some ref (a branch or tag) keeps it reachable. An unmerged feature
+branch is exactly the case where that protection can disappear: if it's deleted (after
+merge, after abandonment, or by cleanup) before this Source reaches `released`, cited
+commits can become unreachable and eventually be garbage-collected — silently breaking
+every pointer citation into it. If a Development Source is cited heavily and its branch's
+survival isn't certain, consider asking the user to push a lightweight tag pinning the
+commit before relying on pointer citations into it. This is a caution, not a mandatory
+gate — pointer-only citation is still the default for git-native material.
+
 ### Development Source state
 States: `in-development`, `merged`, `released`.
 
@@ -184,8 +199,37 @@ Developer B ──┼──→ Merge → Main/Release Branch → Official Releas
 Developer C ──┘
 ```
 
+### Unresolved Concept Flag
+
+Project identity is already resolved before any write happens (§Ingest Confirmation), so
+the remaining case worth guarding against is narrower: material that is correctly filed
+under a known Project/Version, but does not confidently match any existing Concept — and
+it is unclear whether it warrants a new Wiki page. Never force a low-confidence guess
+into a page. Instead, record the gap directly on the Source's own metadata:
+
+```yaml
+unresolved:
+  reason: "no confident Concept match"   # or "ambiguous between [[concept-a]] / [[concept-b]]"
+  since: YYYY-MM-DD
+```
+
+This mirrors the transient `contradiction-check: failed` flag (§Contradiction Check): a
+marker that exists only while the gap is genuinely open, and is removed the moment it's
+resolved — never a permanent annotation.
+
+`wiki-lint` scans `raw/**/*.md` and Sources-category Wiki pages for `unresolved:` blocks
+older than 14 days and surfaces them: either the Concept has since become clear (create
+or update the page, add traceability, remove the flag), or the material serves no
+current or foreseeable task (say so explicitly and remove the flag). Never let an
+`unresolved:` flag age silently unreviewed.
+
 ### Released Source
-Immutable evidence of an official release. Store under:
+Immutable evidence of an official release. **Pointer, not copy** — same rule as
+Development Source: git-native material (source, config, commits, the release tag
+itself) is cited directly by tag/commit, never copied into `raw/`. A released tag is the
+safest possible pointer target (tags are meant to persist, unlike branches), so this is
+the common case with no caveat needed. Non-git material for a Released Source, when any
+exists, still goes under:
 
 ```
 raw/
@@ -215,19 +259,114 @@ A release must always be based on the actual final Git state.
 
 ### Development raw material lifecycle
 `raw/development/` is temporary working ingestion material. `raw/released/` is
-permanent release evidence. When a Project officially releases:
+permanent release evidence. Both now typically hold **only non-git material** — see
+**Raw Storage vs. Git Pointer** below — so most Sources have nothing under either
+directory at all. When a Project officially releases:
 
 1. Confirm the final Git state.
 2. Confirm the release identifier.
-3. Create Released Source evidence under `raw/released/<project-id>/<version>/`.
+3. Update citations that pointed at the development branch/commit to point at the
+   release tag/commit instead.
 4. Update or create the relevant Wiki knowledge, with traceability pointing at the new
    Released Source.
-5. Remove the corresponding temporary material from
-   `raw/development/<project-id>/<version>/<source-id>/`.
+5. If non-git material was staged under
+   `raw/development/<project-id>/<version>/<source-id>/`, and the Released Source
+   supersedes it, move it to `raw/released/<project-id>/<version>/` or remove it —
+   whichever the material actually calls for. Skip this step entirely when the Source was
+   git-native and nothing was ever copied there.
 
 Never keep the same Source duplicated in both `raw/development/` and `raw/released/`.
 No separate raw archive is required beyond this — Git history provides historical
 tracking.
+
+### Raw Storage vs. Git Pointer
+
+`raw/` exists for material that has **no Git-native home**: meeting notes, IM/chat
+records, transcripts, pasted text, downloaded articles, PDFs, cached web pages — anything
+that would otherwise be lost. It is not the default home for material that already lives,
+immutably, in a Project's own Git history.
+
+For a Source that lives in the Project's own Git repository — source code, config,
+commits/diffs, branches, tags — do not copy it into `raw/`. Cite it directly with a
+commit-pinned pointer (§Citations): a permalink URL when the repository has a browsable
+remote (GitHub, GitLab, etc.), which is the common case and requires no local copy at
+all. Only fall back to copying the specific cited excerpt into `raw/` as a drive-by
+citation when the repository has no browsable remote (a fully local-only repo) — in that
+narrow case a permalink cannot exist, and a copy is the only stable target left.
+
+This means a typical `wiki-ingest` of a Git-native Project produces **no new raw/ files
+other than the Source Manifest** (below) — the Source's traceability lives in the Wiki
+page's Source Identity metadata (branch/commit or tag/commit), permalink citations in its
+footnotes, and the manifest.
+
+### Source Manifest
+
+A **Source Manifest** is the provenance record for one ingested Source — a "certificate
+of origin" stating where the evidence lives, what was actually examined, and when. It
+replaces a raw archive for Git-native Sources: rather than copying code into `raw/`, the
+manifest pins the pointer and records the scope, so `wiki-audit` and `wiki-lint` can
+verify claims against exactly the commit the ingest read.
+
+**Location** — one `MANIFEST.md` per Source, in the Source's raw directory even when no
+other raw material exists there:
+
+```
+raw/development/<project-id>/<version>/<source-id>/MANIFEST.md
+raw/released/<project-id>/<version>/MANIFEST.md
+```
+
+The manifest is the one file that lives under `raw/` for a pointer-only Source. Unlike
+other raw material, it is **not immutable**: its ingest history is appended to on every
+re-ingest of the same Source, and its pointer is updated when a Development Source is
+promoted to Released (§Development → Release workflow, step 3).
+
+**Required content:**
+
+```yaml
+---
+project: <project-id>
+version: <version>
+source:
+  id: <source-id>
+  state: in-development       # in-development | merged | released
+  branch: <branch>            # development
+  commit: <full or short sha>
+  release: <tag>              # present only once state: released
+repository: <host>/<org>/<repo>
+permalink-base: https://<host>/<org>/<repo>/blob/<commit>/
+version-evidence: <where the version came from — tag, csproj, config, hardcoded string, user-supplied>
+---
+```
+
+Followed by three sections:
+
+1. **Pointer** — the repository, branch/tag, commit, and the permalink base every Wiki
+   citation into this Source is built from. Note whether the commit is protected by a tag
+   or only by an unmerged branch (§Development Source caution).
+2. **Examined scope** — what the ingest actually read: directories, files, config, Git
+   history range (first..last commit, count), and what was deliberately skipped. This is
+   the boundary `wiki-audit` checks claims against — a claim about a file outside the
+   examined scope is unsupported even if the permalink resolves.
+3. **Ingest history** — append-only, one entry per ingest or revert:
+   ```
+   - YYYY-MM-DD ingest   — <commit> — <pages written> — confirmation: yes
+   - YYYY-MM-DD reverted — <reason>
+   - YYYY-MM-DD ingest   — <commit> (re-ingest of same commit) — confirmation: yes
+   ```
+
+**Rules:**
+
+- `wiki-ingest` writes or updates the manifest as part of the ingest, after the Ingest
+  Confirmation gate and before the commit — never before the user confirms.
+- A revert of an ingest removes the Wiki pages but **keeps the manifest** and appends a
+  `reverted` entry: the fact that a Source was examined is itself provenance.
+- Version provenance is explicit. If the version was not taken from a Git tag or release
+  identifier, `version-evidence` must say where it came from (e.g. "hardcoded string in
+  HealthCheck.cs, adopted by user; no git tag") so a later reader does not mistake it for
+  a release version.
+- The Sources-category Wiki page for this Source cites the manifest path in its
+  `**Source:**` line alongside the repository URL, so a reader can reach the provenance
+  record from the page.
 
 ## Page Frontmatter
 Every wiki page must start with:
@@ -265,6 +404,36 @@ source:
   commit: abc123
   release: v1.2            # present only once state: released
 ```
+
+## Page Maturity
+
+Every Wiki page carries a maturity level tracking how much verification it has survived.
+Maturity is additive to `contradiction-check` and `review` (§Cross-Model Review) — it
+does not replace either.
+
+```yaml
+maturity: draft   # draft | reviewed | verified | trusted
+```
+
+- **draft** — the default. A page with no `maturity` field is treated as `draft`. Set (or
+  left implicit) whenever `wiki-ingest` creates or updates a page.
+- **reviewed** — the page has been through a normal `wiki-audit` pass with no unresolved
+  findings.
+- **verified** — the page has been through `wiki-audit strong` (Cross-Model Review) with
+  `review.status: clean`.
+- **trusted** — a human has explicitly promoted the page — for example because it anchors
+  a recurring decision, or has survived several audit cycles without dispute. Only a
+  human sets `trusted`; no skill promotes a page to `trusted` on its own.
+
+Maturity only advances automatically along `draft → reviewed → verified`. A fresh
+`contradiction-check: failed` flag or a disputed audit demotes the page back to `draft`
+immediately, rather than leaving a stale higher maturity in place. Promoting to `trusted`,
+and demoting away from it, is always a human decision — no skill does either
+automatically.
+
+**Query Workflow requirement:** when an answer relies on a `draft` page (explicit or by
+absence of the field), say so plainly rather than presenting it with the same confidence
+as a `verified`/`trusted` source.
 
 ## Cross-References
 - **link_style:** obsidian
@@ -401,11 +570,15 @@ Three rules for every footnote:
 1. **The cited target is one of three forms:**
    - A slug reference to a Sources-category wiki page, written in the wiki's
      `link_style` (preferred for sources you've ingested via `wiki-ingest`)
-   - A path under `raw/` or `assets/` — for a Project's evidence, this is
-     `raw/development/<project-id>/<version>/<source-id>/<file>` or
-     `raw/released/<project-id>/<version>/<file>` (for drive-by citations where a
-     synthesis page isn't worth creating)
-   - `<URL>` — a live URL, tweet, or ephemeral source (no local copy required)
+   - A path under `raw/` or `assets/` — only for material with no Git-native home
+     (meeting notes, transcripts, pasted text, downloaded documents, PDFs — see **Raw
+     Storage vs. Git Pointer**): `raw/development/<project-id>/<version>/<source-id>/<file>`
+     or `raw/released/<project-id>/<version>/<file>`
+   - `<URL>` — a live URL, tweet, ephemeral source, **or a commit-pinned permalink into a
+     Project's own Git repository** (e.g. `https://github.com/<org>/<repo>/blob/<commit>/<path>`)
+     — the default and preferred way to cite a Project's source code, config, or commits;
+     no local copy required, and it is the stronger citation precisely because the
+     commit it points to cannot change
 
    Never cite entity, concept, or analysis pages — those are syntheses, not sources.
 
@@ -420,9 +593,10 @@ Three rules for every footnote:
    - `L<n>` — a single line, e.g. `L142`
    - `L142-145,L201-203` — disjoint ranges
 
-   The line range refers to lines in the **raw source file** resolved from the target
-   (`[[slug]]` → its `**Source:**` raw path; or a direct `raw/...`/`assets/<file>`
-   path). `raw/` is immutable, so these line numbers are stable references.
+   The line range refers to lines in the file as it exists **at the cited commit** —
+   whether that file is reached via a `raw/...`/`assets/<file>` path (immutable because
+   `raw/` is never edited) or via a commit-pinned permalink (immutable because the commit
+   it points to cannot change). Either way, the line numbers are stable references.
 
    A line-range is **required** for text-addressable sources and applies to BOTH
    citation kinds — a `[synthesis]` footnote marks the block it summarizes with `L…`
@@ -434,10 +608,12 @@ Three rules for every footnote:
 
 **Drive-by citation examples:**
 ```
-[^3]: raw/development/authentication/v1.2/feature-jwt/jwt_service.py L40-52 — "signing_key = ES256"
+[^3]: https://github.com/example/authentication/blob/abc123/src/Auth/JwtService.cs L40-52 — "signing_key = ES256"
 [^4]: raw/released/authentication/v1.1/scaling-notes.pdf p.7 — "loss scales as a power law in compute"
 [^5]: https://twitter.com/user/status/123 (2026-04-15) — "<tweet text>"
 ```
+`[^3]` is the common case — a Git-native Source cited by permalink, no `raw/` copy. `[^4]`
+is non-git material (a PDF) with nowhere else to live, so it's under `raw/released/`.
 
 ## Cross-Model Review
 
@@ -521,15 +697,24 @@ no LLM:
 ## Ingest Workflow
 
 Beyond the generic `wiki-ingest` flow, this wiki's ingest process must resolve Project,
-Version, and Source identity before writing any page:
+Version, and Source identity **and get explicit user confirmation** before writing any
+page. Confirmation is a hard gate, not a courtesy — see **Ingest Confirmation** below.
 
 ```
 Source
   → Identify Project (search existing; register only if genuinely new)
   → Identify Version (from reliable evidence; never invented)
-  → Identify Source State (in-development | merged | released)
-  → Validate Source Identity (branch+commit, or release tag+commit)
-  → Store Source Material (raw/development/... or raw/released/...)
+  → Identify Source (source-id, branch/commit or release tag/commit)
+  → Ask: "Is this Source Released or Development?" — always, never inferred from Git
+    evidence alone (see Ingest Confirmation §1)
+  → Identify Ingest Scope (§Ingest Scope) and Ingest Focus (§Ingest Focus)
+  → Summarize Expected Knowledge (§Expected Knowledge)
+  → Show Ingest Preview (§Ingest Preview)
+  → Ask for Confirmation — WAIT for the user
+  → [user confirms] ↓
+  → Git-native? Cite by commit-pinned pointer (§Raw Storage vs. Git Pointer) :
+    Non-git material only → Store under raw/development/... or raw/released/...
+  → Write or update the Source Manifest (§Source Manifest)
   → Run Knowledge Ingestion
   → Identify Concepts / Knowledge
   → Search Existing Wiki Pages
@@ -540,7 +725,76 @@ Source
   → Commit
 ```
 
-A page must never be created before checking whether the concept already exists.
+A page must never be created before checking whether the concept already exists, and no
+step past "Ask for Confirmation" may run before the user has actually confirmed.
+
+### Ingest Confirmation
+
+**Mandatory rule:** every ingest must have a user-visible confirmation *before*
+ingestion begins — covering Source State, Ingest Scope, Ingest Focus, and Expected
+Knowledge. This is not skipped for repeated or automated-looking ingests unless an
+explicit automation policy has been defined for that specific workflow.
+
+**1. Source state.** Always ask the user to confirm, in these words or equivalent:
+```
+Is this Source:
+1. Released
+2. Development
+```
+This question is never skipped, and Git evidence is never treated as a substitute for
+asking — not even a case that looks unambiguous (e.g. an unmerged feature branch with no
+tag). Git evidence may be cited alongside the question to help the user answer quickly,
+but it never replaces the question itself (**Golden Rule 4, 23**).
+
+**2. Ingest scope.** Identify the relevant material before ingesting — source code,
+configuration, tests, documentation, requirements, design documents, architecture
+diagrams, Git commits/diffs, release notes, incident information, or other explicitly
+provided evidence. Do not ingest unrelated material just because it lives in the same
+Project — scope to what's relevant to the identified Source and its intended purpose.
+
+**3. Ingest focus.** State the knowledge focus as concepts/behavior, not a file listing:
+```
+Bad:  JwtService.cs, AuthController.cs, appsettings.json
+Good: JWT authentication flow, token validation, configuration, and security behavior.
+```
+Multiple focus areas are allowed.
+
+**4. Expected knowledge.** A short, honest preview of what the ingest should produce —
+concepts, behavior, relationships, or decisions. This is a preview only: never claim the
+knowledge already exists before ingestion actually completes.
+
+**5. Show the preview, then ask to proceed:**
+```
+Ingest Preview
+Project:  <project-id / name>
+Version:  <version>
+Source:   <source-id>
+State:    Released | Development
+Will ingest:
+- <scope item>
+- <scope item>
+Focus:
+- <focus area>
+- <focus area>
+Expected knowledge:
+- <expected concept/behavior/decision>
+- <expected concept/behavior/decision>
+
+Ready to ingest? Continue?
+```
+Wait for explicit confirmation. Do not perform any write (raw/ material, wiki pages, or
+commits) until the user confirms.
+
+**6. State shapes what the ingest looks for, once confirmed:**
+- **Released** — prioritize final implementation, released architecture/API
+  behavior/configuration/business rules, release decisions, and notable changes from the
+  previous release. Development-only information must never be presented as released
+  behavior.
+- **Development** — treat the Source as work in progress: current implementation,
+  planned behavior, design decisions, known limitations, open issues, changes from the
+  previous version, new/modified concepts. Development knowledge must be clearly
+  distinguishable from released knowledge and never presented as production behavior
+  (mirrors **Authority and Source Priority** and **Development vs Released Knowledge**).
 
 ## Query Workflow
 
@@ -561,6 +815,29 @@ Question → Identify Project → Identify Version Context
   is given (**Development vs Released Knowledge**, mirrors **Version resolution**).
   Development knowledge must never be presented as production behavior unless the Source
   confirms it has actually been released.
+
+## Feedback Loop
+
+A query that fails or gets corrected is a signal the Wiki should act on, not a dead end.
+
+- **Usage gap** — `wiki-query` finds no relevant knowledge for a question. Do not just
+  answer "not found" and move on: note what was asked and why nothing matched. A
+  recurring gap in the same area is a signal to run `wiki-ingest` against that area's
+  Sources, or to review whether Schema coverage (§Index Categories) has a blind spot.
+- **Correction** — a user says a page's claim is wrong. Treat it like any other
+  `wiki-update`: resolve against the actual Source (§Authority and Source Priority), fix
+  the page, and demote its `maturity` to `draft` pending re-review (§Page Maturity).
+- **Recurring dispute** — a page that repeatedly resurfaces as
+  `contradiction-check: failed` or `review.status: disputed` across multiple
+  ingests/audits signals that the Concept itself may be miscategorized, or the Source is
+  genuinely unstable — worth a `wiki-lint` pass rather than repeatedly patching the same
+  page.
+
+Feedback has no separate storage location — it is handled by re-running the existing
+skills (`wiki-ingest`, `wiki-update`, `wiki-lint`) against the affected pages. The only
+requirement is that a usage gap or correction actually results in one of those operations
+(or a deliberate, stated decision not to act) — noticing a gap and doing nothing with it
+defeats the point.
 
 ## Operation Log & Commit Convention
 Operations: init, ingest, query, update, lint, audit, merge, split
@@ -649,6 +926,32 @@ Projects themselves are not a category — a Project is a cross-cutting scope ca
 `project:` frontmatter (see **Project Context in Wiki Pages**), and a Project's own
 profile/registry page lives under **Structure**.
 
+### Loading Conditions
+
+Each category has a default answer to "when should this be pulled into context for a
+task," so `wiki-query` can prioritize which categories to search first instead of
+scanning everything:
+
+| Category      | Load when...                                                       |
+|----------------|---------------------------------------------------------------------|
+| Sources        | Tracing a claim back to its original evidence                      |
+| Requirements   | Reviewing a proposal/PRD, or checking whether a need is met         |
+| Standards      | Checking correctness, compliance, or terminology during any review |
+| Concepts       | Explaining or learning how a general pattern works                 |
+| Capabilities   | Checking what already exists before building something new         |
+| Structure      | Understanding a system's components/data model, or onboarding      |
+| Flows          | Tracing a sequence or path step by step                            |
+| Decisions      | Understanding why something was built a certain way                |
+| Playbooks      | Executing a known procedure                                        |
+| Lessons        | Avoiding a previously-hit failure mode                              |
+| Changes        | Judging whether known behavior is still current                    |
+| Relationships  | Finding who to ask or what depends on what                         |
+
+This is a starting bias, not an exclusive filter — a query may still need categories
+beyond its primary match. Task-specific routing (e.g. "a PRD review always checks
+Standards and Lessons first") can be layered on top by whatever workflow issues the
+query; this table only fixes the default per-category trigger.
+
 ## Recommended Directory Structure
 
 ```
@@ -663,14 +966,16 @@ profile/registry page lives under **Structure**.
 │   └── hooks/pre-commit
 ├── config/
 │   └── link-style.md
-├── raw/                          ← Project- and Version-scoped, immutable
+├── raw/                          ← non-git material + Source Manifests (§Raw Storage vs. Git Pointer)
 │   ├── development/
 │   │   └── <project-id>/
 │   │       └── <version>/
 │   │           └── <source-id>/
+│   │               └── MANIFEST.md   ← provenance record, one per Source (§Source Manifest)
 │   └── released/
 │       └── <project-id>/
 │           └── <version>/
+│               └── MANIFEST.md
 ├── wiki/
 │   ├── index.md                  ← generated, gitignored
 │   ├── overview.md
@@ -699,6 +1004,8 @@ profile/registry page lives under **Structure**.
 - Preserve Source traceability (§Citations).
 - Use Git branch+commit as authoritative development identity; release tag/identifier
   + commit as authoritative released identity.
+- Cite Git-native material by commit-pinned pointer; never copy it into `raw/` (§Raw
+  Storage vs. Git Pointer). `raw/` is for material with no Git-native home only.
 
 **Wiki**
 - Search existing concepts before creating pages; update rather than duplicate.
@@ -712,6 +1019,12 @@ profile/registry page lives under **Structure**.
 **Uncertainty**
 - If information cannot be determined reliably, ask the user rather than inventing it —
   applies to Project identity, Version, Source state, and factual claims alike.
+
+**Ingest Confirmation**
+- Never write anything (raw/ material, wiki pages, or a commit) before the user has seen
+  the Ingest Preview and explicitly confirmed (§Ingest Confirmation).
+- Always ask Released-vs-Development explicitly — Git evidence is context for the
+  question, never a substitute for asking it.
 
 ## Golden Rules
 
@@ -741,9 +1054,20 @@ profile/registry page lives under **Structure**.
 24. The schema must remain technology-independent.
 25. `raw/` is immutable evidence; committed Wiki pages must never carry an unresolved
     `contradiction-check: failed` flag (§Contradiction Check, §Pre-commit Gate).
+26. Every ingest requires a user-visible preview and explicit confirmation (Source
+    State, Scope, Focus, Expected Knowledge) before any write happens (§Ingest
+    Confirmation) — never skipped for a repeated or automated-looking ingest without an
+    explicit automation policy.
+27. Git-native Source material (code, config, commits) is cited by commit-pinned
+    pointer, never copied into `raw/` — `raw/` is reserved for material with no
+    Git-native home (§Raw Storage vs. Git Pointer).
+28. Every ingested Source has a Source Manifest recording its pointer, examined scope,
+    version evidence, and ingest history; a revert keeps the manifest and logs the
+    revert (§Source Manifest).
 
 ## Conventions
-- raw/ is immutable — skills never modify it; it is split into `raw/development/<project-id>/<version>/<source-id>/` (temporary) and `raw/released/<project-id>/<version>/` (permanent) — see §Source
+- raw/ holds only material with no Git-native home (never Project source/config/commits — those are cited by commit-pinned pointer instead, see §Raw Storage vs. Git Pointer) plus one `MANIFEST.md` per Source; non-manifest material is immutable and skills never modify it; split into `raw/development/<project-id>/<version>/<source-id>/` (temporary) and `raw/released/<project-id>/<version>/` (permanent) — see §Source
+- source manifest: every ingest writes/updates `MANIFEST.md` in the Source's raw directory — pointer (repo/branch/commit/permalink base), examined scope, version evidence, append-only ingest history; reverts keep the manifest and log the revert (see §Source Manifest)
 - operation log: git wikis record each op as a commit (see Operation Log & Commit Convention) and render it with bin/render-log.py; non-git wikis append to log.md (append-only, never rewritten)
 - index.md is GENERATED by bin/generate-index.py and is gitignored — never hand-edit it; set page frontmatter (category, summary) and regenerate instead
 - All pages live flat in wiki/pages/ — no subdirectories, no Project folders; Project ownership is a `project:` frontmatter field
@@ -754,3 +1078,4 @@ profile/registry page lives under **Structure**.
 - pre-commit gate: git wikis run bin/hooks/pre-commit (via core.hooksPath) → bin/check-contradictions.py, which blocks any commit staging a page that still carries the flag (see Pre-commit Gate); re-run `git config core.hooksPath bin/hooks` after a fresh clone
 - README boundary: wiki pages must not duplicate README content. Extract structural signals; link to the README for operational content (setup, contributing, running). When ingesting any README, also evaluate it for gaps and suggest edits.
 - authority: Git repository > Released Source > Development Source > Wiki > AI inference — a Wiki page that conflicts with its own Source is corrected, not the Source (see Authority and Source Priority)
+- ingest confirmation: every ingest shows a Project/Version/Source/State/Scope/Focus/Expected-knowledge preview and waits for explicit user confirmation before any write — mandatory, not skippable for repeat ingests without a defined automation policy (see Ingest Confirmation)

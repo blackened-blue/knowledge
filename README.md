@@ -1,4 +1,4 @@
-# knowledge
+# Knowledge
 
 A portable, Git-based engineering knowledge base. See `SCHEMA.md` for the full schema
 and rules.
