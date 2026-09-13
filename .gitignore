@@ -1,3 +1,10 @@
+# Audit reports are regenerated local-only artifacts (wiki-audit). The committed record
+# of an audit is the `review:` frontmatter token on the audited page, not the report.
+wiki/pages/audit-*.md
+# index.md is generated from page frontmatter by bin/generate-index.py — a runtime
+# artifact, regenerated on demand. The source of truth is each page's frontmatter.
+wiki/index.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
